@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 
 const userSchema = new mongoose.Schema({
     name: {
-        type: String
+        type: String,
+        required: true
     },
     email: {
         type: String,
@@ -16,7 +17,7 @@ const userSchema = new mongoose.Schema({
     },
     roles: [{
         type: String,
-        enum: ['student', 'faculty', 'caretaker', 'coach', 'executive', 'admin', 'guard'],
+        enum: ['student', 'faculty', 'caretaker', 'coach', 'executive', 'admin', 'guard', 'gym_admin', 'swim_admin'],
         default: 'student'
     }],
     status: {
