@@ -1,0 +1,427 @@
+# P.A.T.A.N.G. — Deep Onboarding Audit Report
+
+> **Date:** 2026-03-22 | **Auditor:** Principal Architect Review | **Repo:** Patang (backend-only)
+
+---
+
+## 1. Executive Summary
+
+P.A.T.A.N.G. is a **backend-only Node.js/Express API** for IIT Kanpur's campus resource management. There is **no frontend in the repository** — only the backend API server exists. The codebase is reasonably well-structured and implements a substantial portion of the SRS, with particular depth in sports facility booking, gym/swim subscriptions, caretaker operations, and event management.
+
+**Key findings:**
+- **Stack matches SRS:** Node.js + Express + MongoDB + OTP auth + QR systems ✔
+- **Frontend is absent:** ReactJS (specified in SRS) is not present
+- **V1/V2 dual-model pattern** creates significant technical debt — two parallel schemas for Bookings and Subscriptions
+- **Executive Portal is partially scaffolded** — executives can review events and subscriptions, but there is **no dedicated executive dashboard or unified executive portal**
+- **9 user roles** are defined, but only some have dedicated portals/routes
+- **No automated test suite** exists
+- **CORS is fully open** (`app.use(cors())`) — security concern for production
+
+---
+
+## 2. System Architecture Overview
+
+### Project Type
+Backend-only REST API monolith. No frontend, no microservices.
+
+### Tech Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| Runtime | Node.js | ESM modules (`"type": "module"`) |
+| Framework | Express.js | v5.2.1 |
+| Database | MongoDB via Mongoose | v9.3.0 |
+| Auth | JWT (jsonwebtoken) | v9.0.3 |
+| Password hashing | bcryptjs | v3.0.3 |
+| File uploads | Multer | v2.1.1 |
+| QR generation | qrcode | v1.5.4 |
+| Email | Nodemailer | v8.0.2 |
+| Cron jobs | node-cron | v4.2.1 |
+| Date handling | dayjs | v1.11.20 |
+| UUID | uuid | v13.0.0 |
+| Package manager | npm (lock file present) | — |
+
+### API Style
+REST, with a dual versioning scheme:
+- **V1:** `/api/auth`, `/api/facilities`, `/api/bookings`, `/api/subscriptions`
+- **V2:** `/api/v2/facilities`, `/api/v2/bookings`, `/api/v2/subscriptions`, `/api/v2/events`, `/api/v2/admin/*`
+- **Page-optimized endpoints:** `/api/dashboard`, `/api/slot-booking/*`, `/api/history/*`, `/api/calendar`, `/api/settings`, `/api/coordinator/*`, `/api/feedback`
+
+### Directory Architecture
+
+```
+backend/
+├── package.json          # Dependencies, ESM config
+├── src/
+│   ├── server.js         # Entry: dotenv, MongoDB connect, app.listen
+│   ├── app.js            # Express app: CORS, routes, cron job init
+│   ├── controllers/      # 17 files — all business logic
+│   ├── models/           # 15 Mongoose schemas
+│   ├── routes/           # 18 Express routers
+│   ├── middlewares/      # 3 files: auth, upload, validation
+│   ├── services/         # 7 files: reusable business logic
+│   ├── utils/            # 5 files: helpers, token gen, email
+│   └── jobs/             # 4 cron job definitions
+```
+
+### Entry Points & Initialization Flow
+1. [server.js](file:///c:/Users/HP/Patang/backend/src/server.js) → loads `.env`, connects to MongoDB, starts Express
+2. [app.js](file:///c:/Users/HP/Patang/backend/src/app.js) → mounts CORS, JSON parser, static file serving, all 18 route groups, starts 4 cron jobs
+3. All cron jobs start with `.start()` at import time in [app.js](file:///c:/Users/HP/Patang/backend/src/app.js)
+
+### State Management
+Stateless JWT-based auth. No server-side sessions. All state in MongoDB.
+
+### Environment Configuration
+- `MONGO_URI` — MongoDB connection string
+- `JWT_SECRET` — JWT signing key (also reused for QR token signing)
+- `PORT` — server port (default 5000)
+- `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASS` — SMTP for OTP emails (implied by nodemailer usage)
+
+---
+
+## 3. Domain Model
+
+### Core Entities & Relationships
+
+```mermaid
+erDiagram
+    User ||--o{ Booking : "creates (V1)"
+    User ||--o{ SportsBooking : "creates (V2)"
+    User ||--o{ SubscriptionV2 : "applies for"
+    User ||--o{ Penalty : "receives"
+    User ||--o{ AccessLog : "logs entry/exit"
+    User ||--o{ Event : "creates"
+    User ||--o{ Feedback : "submits"
+    User ||--o{ FacilityBlock : "requests"
+
+    Facility ||--o{ TimeSlot : "has (V1)"
+    Facility ||--o{ SportsSlot : "has (V2)"
+    Facility ||--o{ FacilityBlock : "blocked by"
+
+    TimeSlot ||--o{ Booking : "booked via (V1)"
+    SportsSlot ||--o{ SportsBooking : "booked via (V2)"
+
+    SubscriptionV2 ||--o{ AccessLog : "scan logs"
+    Booking ||--o{ Penalty : "triggers"
+
+    SubscriptionPlan }|--|| Subscription : "pricing for (V1)"
+    AccessPass }|--|| Subscription : "pass for (V1)"
+```
+
+### Entity Summary
+
+| Entity | Collection | Purpose |
+|--------|-----------|---------|
+| [User](file:///c:/Users/HP/Patang/backend/src/controllers/authController.js#77-99) | users | Identity, roles (array), profile, OTP, password |
+| [Facility](file:///c:/Users/HP/Patang/backend/src/services/accessService.js#15-19) | facilities | Sports courts, gyms, pools, venues |
+| `TimeSlot` | timeslots | V1 generated time blocks for facilities |
+| `SportsSlot` | sportsslots | V2 template slots with day-of-week rules |
+| [Booking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#245-300) | bookings | V1 sports booking records |
+| [SportsBooking](file:///c:/Users/HP/Patang/backend/src/controllers/slotBookingController.js#83-311) | sportsbookings | V2 sports booking records |
+| [Subscription](file:///c:/Users/HP/Patang/backend/src/controllers/subscriptionControllerV2.js#56-70) | subscriptions | V1 gym/swim subscription (largely superseded) |
+| `SubscriptionV2` | subscriptionv2s | V2 gym/swim with QR pass, review workflow |
+| `SubscriptionPlan` | subscriptionplans | Plan pricing/duration definitions |
+| `AccessPass` | accesspasses | V1 QR pass (likely orphaned) |
+| [AccessLog](file:///c:/Users/HP/Patang/backend/src/services/accessService.js#128-137) | accesslogs | Entry/exit scan records |
+| [Penalty](file:///c:/Users/HP/Patang/backend/src/services/penaltyService.js#9-25) | penalties | NoShow, LateCancellation, Misuse records |
+| [Event](file:///c:/Users/HP/Patang/backend/src/controllers/coordinatorController.js#93-164) | events | Campus events with approval workflow |
+| `FacilityBlock` | facilityblocks | Venue reservations/closures |
+| [Feedback](file:///c:/Users/HP/Patang/backend/src/controllers/feedbackController.js#90-147) | feedbacks | User feedback/complaints |
+
+### Roles Defined in `User.roles` Enum
+
+`student`, `faculty`, `caretaker`, `coach`, `executive`, [admin](file:///c:/Users/HP/Patang/backend/src/controllers/subscriptionControllerV2.js#115-181), `coordinator`, `gym_admin`, `swim_admin`
+
+> **Note:** Users have an **array** of roles — a single user can hold multiple roles simultaneously.
+
+### Business Rules in Code
+
+| Rule | Location | Detail |
+|------|----------|--------|
+| Fair-use quota | [bookingService.js](file:///c:/Users/HP/Patang/backend/src/services/bookingService.js) | Max 2 active bookings in 72-hour rolling window |
+| No-show penalty | [penaltyService.js](file:///c:/Users/HP/Patang/backend/src/services/penaltyService.js) | 3 no-shows in 30 days → 7-day suspension |
+| Late cancel penalty | [penaltyService.js](file:///c:/Users/HP/Patang/backend/src/services/penaltyService.js) | 2 late cancellations in 30 days → 7-day suspension |
+| Late cancel threshold | [bookingControllerV2.js](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js) | Cancel < 2 hours before slot = late cancel |
+| Check-in window | [bookingControllerV2.js](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js) | Slot start → slot start + 15 min |
+| Group auto-cancel | [groupBookingService.js](file:///c:/Users/HP/Patang/backend/src/services/groupBookingService.js) | Unfilled groups cancelled 4 hours before slot |
+| Domain restriction | [authController.js](file:///c:/Users/HP/Patang/backend/src/controllers/authController.js) | Registration requires `@iitk.ac.in` email |
+| Slot generation | [slotGeneratorService.js](file:///c:/Users/HP/Patang/backend/src/services/slotGeneratorService.js) | Forward slots for next 3 days |
+| Subscription plans | [subscriptionService.js](file:///c:/Users/HP/Patang/backend/src/services/subscriptionService.js) | Monthly=30d, Semesterly=180d, Yearly=365d |
+| Pass ID format | [subscriptionService.js](file:///c:/Users/HP/Patang/backend/src/services/subscriptionService.js) | `GYM-YYYY-NNN` or `POOL-YYYY-NNN` |
+| QR token expiry | [qrService.js](file:///c:/Users/HP/Patang/backend/src/services/qrService.js) | 24 hours (booking QR) |
+
+---
+
+## 4. Feature Implementation Matrix (SRS vs Code)
+
+| SRS Feature | Status | Evidence |
+|-------------|--------|----------|
+| **Sports Facility Booking** | ✔ Fully implemented | V1+V2 booking controllers, slot discovery, capacity tracking |
+| **Group Bookings** | ✔ Fully implemented | [joinGroupBooking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#183-244), auto-expiry, `Provisioned→Confirmed` flow |
+| **Booking Cancellation + Penalties** | ✔ Fully implemented | Late cancel detection, penalty creation, auto-suspension |
+| **Fair-Use Rules** | ✔ Fully implemented | 72h window, max 2 bookings, suspension check |
+| **Gym Subscription** | ✔ Fully implemented | Application, admin review, QR pass, plan pricing |
+| **Swimming Pool Subscription** | ✔ Fully implemented | Same as gym, scoped with `swim_admin` |
+| **QR-Based Access** | ✔ Fully implemented | Two systems: JWT-QR for bookings, data-URL QR for subscriptions |
+| **Entry/Exit Logging** | ✔ Fully implemented | [AccessLog](file:///c:/Users/HP/Patang/backend/src/services/accessService.js#128-137) model, auto entry/exit toggle |
+| **Occupancy Tracking** | ✔ Fully implemented | Aggregation pipeline in [accessService.js](file:///c:/Users/HP/Patang/backend/src/services/accessService.js) |
+| **Caretaker Dashboard** | ✔ Fully implemented | List bookings, verify attendee, mark attendance, release slots |
+| **Event Calendar** | ✔ Fully implemented | Calendar view grouped by date, category breakdown |
+| **Event Submission (Coordinator)** | ✔ Fully implemented | Submit with poster, goes to executive approval |
+| **Event Approval (Executive/Admin)** | ✔ Fully implemented | Approve/reject/request changes |
+| **Venue Booking (Coordinator)** | ✔ Fully implemented | Availability check, overlap prevention, approval workflow |
+| **Feedback System** | ✔ Fully implemented | Submit (anonymous option), inbox by role, reply/status update |
+| **User Dashboard** | ✔ Fully implemented | 8-query aggregation, fair-use score, merged V1+V2 |
+| **History with Pagination** | ✔ Fully implemented | Sports, gym/swim, penalties — all paginated |
+| **Settings / Profile** | ✔ Fully implemented | Profile view/edit, password change, profile card |
+| **OTP Email Verification** | ✔ Fully implemented | Registration + password reset |
+| **Scheduled Automation** | ✔ Fully implemented | 4 cron jobs: no-show, group expiry, subscription expiry, slot gen |
+| **Unified Gymkhana Calendar** | ✔ Fully implemented | Events + personal bookings overlaid |
+| **New-SAC Room Booking** | ⚠ Partially | Venue booking via coordinator exists, but no dedicated SAC model |
+| **Executive Dashboard/Portal** | ⚠ Partially | Executives can review events/subscriptions, but no unified portal |
+| **Admin User Management** | ❌ Not implemented | No endpoints to create/assign/remove roles |
+| **Notification System** | ❌ Not implemented | No push/in-app notifications; only OTP email exists |
+| **Analytics / Reporting** | ❌ Not implemented | No analytics endpoints or dashboards |
+| **Frontend (ReactJS)** | ❌ Not implemented | Repository is backend-only |
+| **Payment Integration** | ❌ Not implemented | Only manual receipt upload exists |
+
+---
+
+## 5. Role & Permission Model
+
+### Role-to-Route Access Matrix
+
+| Route Group | student | faculty | caretaker | coach | coordinator | executive | admin | gym_admin | swim_admin |
+|---|---|---|---|---|---|---|---|---|---|
+| Auth (`/api/auth/*`) | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Dashboard (`/api/dashboard`) | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Create Booking (V2) | ✔ | ✔ | — | — | — | ✔ | ✔ | — | — |
+| Join Group Booking | ✔ | ✔ | — | — | — | — | — | — | — |
+| Cancel Booking | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) | ✔ (own) |
+| Caretaker Booking Ops | — | — | ✔ | — | — | — | ✔ | — | — |
+| Subscription Apply | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Subscription Admin Review | — | — | — | — | — | ✔ | ✔ | ✔* | ✔* |
+| Verify Entry (QR Scan) | — | — | ✔ | — | — | ✔ | ✔ | ✔* | ✔* |
+| Coordinator Events/Venues | — | — | — | — | ✔ | ✔ | ✔ | — | — |
+| Event Admin Review | — | — | — | — | — | ✔ | ✔ | — | — |
+| Feedback Submit | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Feedback Inbox | — | — | ✔ | — | ✔ | ✔ | ✔ | ✔ | ✔ |
+
+*\* `gym_admin`/`swim_admin` are scoped to their respective facility types via [getScopedSubscriptionTypes()](file:///c:/Users/HP/Patang/backend/src/services/accessService.js#25-46)*
+
+### Authorization Enforcement
+- **Mechanism:** Two-layer middleware chain: [protectRoute](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js#4-22) (JWT verification) → [authorizeRoles(...)](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js#23-33) (role check)
+- **[protectRoute](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js#4-22):** Extracts Bearer token, verifies JWT, populates `req.user` from DB
+- **[authorizeRoles](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js#23-33):** Checks `req.user.roles.some(role => allowedRoles.includes(role))`
+- **Scoping (facility-specific):** [getScopedSubscriptionTypes()](file:///c:/Users/HP/Patang/backend/src/services/accessService.js#25-46) further constrains `gym_admin` and `swim_admin`
+
+### Security Observations
+
+> [!WARNING]
+> - **Cancel booking has no role restriction** — `DELETE /api/v2/bookings/:bookingId` only applies [protectRoute](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js#4-22), meaning any authenticated user can attempt cancellation (ownership is checked in controller code, not middleware)
+> - **`coach` role is defined** in the User schema but has **zero dedicated routes** — functionally identical to `student`
+> - **JWT `expiresIn: '30d'`** — very long token lifetime with no refresh mechanism or revocation list
+> - **CORS is fully open** — `app.use(cors())` allows all origins
+> - **`JWT_SECRET` reused for QR tokens** — separate secrets would be safer
+> - **No rate limiting** on any endpoint (auth, booking, etc.)
+> - No CSRF protection (stateless JWT mitigates this somewhat)
+
+---
+
+## 6. Key Workflows
+
+### 6.1 User Authentication Flow
+```
+Register (email@iitk.ac.in + password)
+  → Create unverified User + generate 6-digit OTP
+  → Send OTP via Nodemailer
+  → User submits OTP
+  → isVerified=true, return JWT
+  → Login: verify password → return JWT (30-day expiry)
+```
+
+### 6.2 Slot Booking Flow (V2)
+```
+GET /api/slot-booking/sports → fetch facilities, slot templates, capacity
+  → Check suspension status
+  → Check fair-use quota (≤2 in 72h)
+  → POST /api/v2/bookings → validate facility + slot
+    → Optimistic concurrency: slot Available→Booked
+    → Create Booking (Confirmed or Provisioned for group)
+    → Generate JWT-based QR token
+  → At facility: POST .../check-in → caretaker scans QR
+    → Validate window (slot start → +15 min)
+    → Mark Attended
+  → If no check-in: cron job marks NoShow → penalty
+```
+
+### 6.3 Subscription + QR Flow
+```
+GET /api/slot-booking/gym → plans, pricing, occupancy
+  → POST /api/v2/subscriptions/apply (multipart: medicalCert + paymentReceipt)
+    → Create SubscriptionV2 (status: Pending)
+  → Admin: GET /api/v2/admin/subscriptions (scoped by facility type)
+    → PATCH .../approve → generate passId + QR data URL
+  → At facility: POST .../verify-entry (passId or QR payload)
+    → Validate subscription active + date range
+    → Auto-toggle entry/exit based on last action
+    → Log AccessLog → update occupancy
+```
+
+### 6.4 Event Management Flow
+```
+Coordinator: POST /api/coordinator/events (+ optional poster)
+  → Create Event (status: Pending)
+  → Executive/Admin: GET /api/v2/admin/events/pending
+    → PATCH .../approve|reject|requestChanges
+  → Approved events appear in calendar + dashboard
+```
+
+### 6.5 Venue Booking Flow
+```
+Coordinator: GET /api/coordinator/venues?date=
+  → POST /api/coordinator/venues (venueId, times, reason)
+    → Overlap check → Create FacilityBlock (status: pending)
+  → Executive approval needed (implied, but approval endpoint not implemented)
+```
+
+> [!IMPORTANT]
+> **Venue booking approval endpoint is missing.** The coordinator creates `FacilityBlock` with status `pending`, but there is no dedicated endpoint for executives to approve/reject venue booking requests. This is a gap.
+
+### 6.6 Feedback Flow
+```
+User: POST /api/feedback → targetRole + subject + message + isAnonymous
+  → Staff: GET /api/feedback/inbox (filtered by their roles)
+    → Anonymous submissions have user details stripped
+  → PATCH .../reply → status update + adminReply
+```
+
+---
+
+## 7. Executive Portal Readiness Analysis
+
+### What Executive Functionality Already Exists
+
+| Capability | Endpoint | Status |
+|-----------|---------|--------|
+| Review pending events | `GET /api/v2/admin/events/pending` | ✔ Works |
+| Approve/reject/request-changes events | `PATCH /api/v2/admin/events/:eventId` | ✔ Works |
+| Review subscription applications | `GET /api/v2/admin/subscriptions` | ✔ Works |
+| Approve/reject subscriptions | `PATCH /api/v2/admin/subscriptions/:id` | ✔ Works |
+| View occupancy | `GET /api/v2/admin/subscriptions/occupancy` | ✔ Works |
+| Verify entry (QR scan) | `POST /api/v2/subscriptions/verify-entry` | ✔ Works |
+| View feedback inbox | `GET /api/feedback/inbox` | ✔ Works (targets `executive` + `general`) |
+| Reply to feedback | `PATCH /api/feedback/:id/reply` | ✔ Works |
+| Coordinator portal access | `GET/POST /api/coordinator/*` | ✔ Executive role included |
+| Create bookings | `POST /api/v2/bookings` | ✔ Executive role included |
+
+### What Is Missing for a Dedicated Executive Portal
+
+1. **No unified executive dashboard** — executives must hit separate endpoints
+2. **No venue booking approval/rejection endpoint** — FacilityBlocks with `pending` status have no review API
+3. **No cross-module analytics** — no aggregate stats endpoint
+4. **No user/role management** — cannot assign or remove roles
+5. **No facility management CRUD** — cannot create/edit/disable facilities
+6. **No penalty management** — cannot view/clear/modify penalties for users
+7. **No system configuration** — cannot modify booking rules, plan pricing, etc. via API
+
+### Dependencies for Executive Portal
+
+```mermaid
+graph TD
+    EP["Executive Portal"] --> Events["Event Review (exists)"]
+    EP --> Subs["Subscription Review (exists)"]
+    EP --> Venues["Venue Approval (MISSING)"]
+    EP --> Feedback["Feedback Inbox (exists)"]
+    EP --> Dashboard["Unified Dashboard (MISSING)"]
+    EP --> Analytics["Analytics (MISSING)"]
+    EP --> UserMgmt["User Management (MISSING)"]
+    EP --> FacilityMgmt["Facility CRUD (MISSING)"]
+    EP --> PenaltyMgmt["Penalty Management (MISSING)"]
+```
+
+### Integration Points
+- **Event model** — `status`, `reviewedBy`, `reviewedAt` fields already support executive actions
+- **SubscriptionV2** — `reviewedBy`, `reviewedAt`, `reviewComments` ready
+- **FacilityBlock** — `approvedBy` field exists but is never populated
+- **Feedback** — `targetRole: 'executive'` routing already works
+- **User model** — `roles` array can be updated but no admin API exists
+
+### Merge Conflict Risk Areas
+- [app.js](file:///c:/Users/HP/Patang/backend/src/app.js) — every new route group requires a mount point here
+- [authMiddleware.js](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js) — any changes to role logic affect all modules
+- Route files for admin endpoints if multiple developers add executive routes simultaneously
+
+---
+
+## 8. Collaboration Risk Map
+
+### High Change-Frequency Areas
+| File/Area | Risk | Reason |
+|-----------|------|--------|
+| [app.js](file:///c:/Users/HP/Patang/backend/src/app.js) | 🔴 High | Every feature adds route mounts here |
+| [authMiddleware.js](file:///c:/Users/HP/Patang/backend/src/middlewares/authMiddleware.js) | 🔴 High | Shared across all protected endpoints |
+| [User.js](file:///c:/Users/HP/Patang/backend/src/models/User.js) model | 🟡 Medium | Role additions require enum update + migration |
+| [validate.js](file:///c:/Users/HP/Patang/backend/src/middlewares/validate.js) | 🟡 Medium | All validation in one file |
+
+### Shared Components Causing Clashes
+- **V1/V2 controllers query the same models** — `dashboardController`, `historyController`, `slotBookingController` all query both [Booking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#245-300) and [SportsBooking](file:///c:/Users/HP/Patang/backend/src/controllers/slotBookingController.js#83-311)
+- **[bookingService.js](file:///c:/Users/HP/Patang/backend/src/services/bookingService.js)** — shared by booking creation and dashboard fair-use logic
+- **[accessService.js](file:///c:/Users/HP/Patang/backend/src/services/accessService.js)** — shared by subscription admin, entry verification, and occupancy
+
+### Global State Risks
+- **Cron jobs run in-process** — if one job crashes, it could affect the Express event loop
+- **No connection pooling config** — Mongoose defaults
+
+### Database Schema Coupling
+- **V1/V2 field naming inconsistency:** [Booking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#245-300) uses `userId/facilityId/slotId`, [SportsBooking](file:///c:/Users/HP/Patang/backend/src/controllers/slotBookingController.js#83-311) uses `user/facility/slot` — any shared query builder must handle both
+- **`AccessLog.facilityType`** enum allows BOTH lowercase (`gym`, `swimming`) AND PascalCase ([Gym](file:///c:/Users/HP/Patang/backend/src/controllers/slotBookingController.js#316-415), `SwimmingPool`) — data inconsistency risk in aggregation
+- **`Penalty.bookingId`** references [Booking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#245-300) model only — V2 [SportsBooking](file:///c:/Users/HP/Patang/backend/src/controllers/slotBookingController.js#83-311) penalties are not tracked
+
+### Inconsistent Patterns
+- Response format: some controllers return `{ success, data }` via [apiResponse.js](file:///c:/Users/HP/Patang/backend/src/utils/apiResponse.js), others return raw `{ message }` (auth controller)
+- Error handling: auth controller uses `res.status().json()`, everything else uses `errorResponse()`
+- Naming: `cancelledAt` vs absence of consistent cancellation tracking across V1/V2
+
+---
+
+## 9. Critical Technical Debt
+
+| Item | Severity | Detail |
+|------|----------|--------|
+| V1/V2 dual models | 🔴 High | Two parallel schemas for Bookings and Subscriptions. Dashboard/history must merge both. |
+| No tests | 🔴 High | `"test": "echo \"Error: no test specified\""` — zero automated tests |
+| CORS wide open | 🔴 High | `app.use(cors())` with no origin restriction |
+| No rate limiting | 🟡 Medium | Auth endpoints (login, register, OTP) vulnerable to brute force |
+| JWT reused for QR | 🟡 Medium | `JWT_SECRET` used for both auth tokens and QR tokens |
+| 30-day token lifetime | 🟡 Medium | No refresh flow, no token revocation |
+| AccessPass model orphaned | 🟡 Medium | V1 `AccessPass` references [Subscription](file:///c:/Users/HP/Patang/backend/src/controllers/subscriptionControllerV2.js#56-70), never used by V2 flow |
+| Venue approval gap | 🟡 Medium | FacilityBlock approval endpoint not implemented |
+| No input sanitization | 🟡 Medium | Beyond basic validation, no XSS/injection sanitization |
+| [name](file:///c:/Users/HP/Patang/backend/src/middlewares/upload.js#17-22) field on User not required at registration | 🟢 Low | [registerUser](file:///c:/Users/HP/Patang/backend/src/controllers/authController.js#5-52) doesn't collect name; User model requires it — potential save error |
+| Data URL QR stored in DB | 🟢 Low | Full base64 images in `SubscriptionV2.qrCode` — storage bloat |
+
+---
+
+## 10. Unknowns / Clarifications Needed
+
+1. **Where is the SRS document?** The user mentioned providing an SRS but it was not attached as a file. Analysis was done against the PR README and backend documentation as proxies. If the actual SRS PDF exists, it should be reviewed for additional requirements.
+
+2. **`AccessPass` model** — Is this intentionally kept for backward compatibility, or is it dead code that should be removed?
+
+3. **`coach` role** — Defined in the enum but has zero dedicated routes or logic. Is this role intended for future use, or was it abandoned?
+
+4. **`guard` role** — Present in `Facility.allowedRoles` enum but not in `User.roles` enum. Unclear origin.
+
+5. **Venue booking approval** — Coordinators can create `FacilityBlock` with status `pending`, but no approval endpoint exists. How are venue bookings currently approved? Directly in the database?
+
+6. **V1 vs V2 migration strategy** — Will V1 models ([Booking](file:///c:/Users/HP/Patang/backend/src/controllers/bookingControllerV2.js#245-300), [Subscription](file:///c:/Users/HP/Patang/backend/src/controllers/subscriptionControllerV2.js#56-70), `TimeSlot`, `AccessPass`) be deprecated? Or are they permanently maintained alongside V2?
+
+7. **File upload storage** — Uploads go to local `uploads/` directory. Is there a cloud storage migration plan for production?
+
+8. **Email configuration** — [sendEmail.js](file:///c:/Users/HP/Patang/backend/src/utils/sendEmail.js) uses nodemailer but the actual SMTP config is env-based. Is the SMTP server reliable for OTP delivery at scale?
+
+9. **User creation flow** — [registerUser](file:///c:/Users/HP/Patang/backend/src/controllers/authController.js#5-52) creates a User without a [name](file:///c:/Users/HP/Patang/backend/src/middlewares/upload.js#17-22) field, but the User schema marks [name](file:///c:/Users/HP/Patang/backend/src/middlewares/upload.js#17-22) as required. This likely causes a validation error on save unless the name is provided in the request body (not validated in the controller).
+
+10. **[Subscription](file:///c:/Users/HP/Patang/backend/src/controllers/subscriptionControllerV2.js#56-70) (V1) model** — Still referenced by `AccessPass` model. Are there any active V1 subscriptions in the production database that need continued support?

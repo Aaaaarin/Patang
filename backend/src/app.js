@@ -24,6 +24,7 @@ import calendarRoutes from './routes/calendarRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import coordinatorRoutes from './routes/coordinatorRoutes.js';
 import feedbackRoutes from './routes/feedbackRoutes.js';
+import executiveRoutes from './routes/executiveRoutes.js';
 
 // Cron jobs
 import groupExpiryJob from './jobs/groupExpiryJob.js';
@@ -63,6 +64,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/coordinator', coordinatorRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/executive', executiveRoutes);
 
 // Start cron jobs
 groupExpiryJob.start();
