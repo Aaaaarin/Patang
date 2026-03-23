@@ -17,9 +17,13 @@ const userSchema = new mongoose.Schema({
     },
     roles: [{
         type: String,
-        enum: ['student', 'faculty', 'caretaker', 'coach', 'executive', 'admin', 'coordinator', 'gym_admin', 'swim_admin'],
+        enum: ['student', 'faculty', 'caretaker', 'captain', 'executive', 'admin', 'coordinator', 'gym_admin', 'swim_admin'],
         default: 'student'
     }],
+    captainOf: {
+        type: String,
+        trim: true
+    },
     status: {
         type: String,
         enum: ['active', 'suspended', 'disabled'],

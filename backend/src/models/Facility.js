@@ -33,7 +33,7 @@ const facilitySchema = new mongoose.Schema(
         allowedRoles: [
             {
                 type: String,
-                enum: ['student', 'faculty', 'caretaker', 'coach', 'executive', 'admin', 'guard', 'gym_admin', 'swim_admin']
+                enum: ['student', 'faculty', 'caretaker', 'captain', 'executive', 'admin', 'guard', 'gym_admin', 'swim_admin']
             }
         ],
         isOperational: {

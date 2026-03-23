@@ -1,6 +1,7 @@
 import Facility from '../models/Facility.js';
 import SportsSlot from '../models/SportsSlot.js';
 import SportsBooking from '../models/SportsBooking.js';
+import TeamPracticeBlock from '../models/TeamPracticeBlock.js';
 import Booking from '../models/Booking.js';
 import SubscriptionV2 from '../models/SubscriptionV2.js';
 import SubscriptionPlan from '../models/SubscriptionPlan.js';
@@ -219,6 +220,40 @@ export const getSportsBookingPage = async (req, res) => {
             }
 
             courtSlots = Array.from(courtMap.values());
+
+            // ── Check for approved team practice blocks ──────────────
+            const practiceBlocks = await TeamPracticeBlock.find({
+                facility: { $in: facilityIds },
+                status: 'approved',
+                daysOfWeek: dayOfWeek
+            })
+                .populate('captain', 'name')
+                .select('facility startTime endTime captain sport')
+                .maxTimeMS(5000)
+                .lean();
+
+            // Mark overlapping slots as 'Team Practice'
+            if (practiceBlocks.length > 0) {
+                for (const court of courtSlots) {
+                    for (const slot of court.slots) {
+                        for (const pb of practiceBlocks) {
+                            if (String(court.facilityId) !== String(pb.facility)) continue;
+
+                            // Check time overlap
+                            if (slot.startTime < pb.endTime && slot.endTime > pb.startTime) {
+                                slot.status = 'Team Practice';
+                                slot.practiceBlock = {
+                                    captain: pb.captain?.name || 'Captain',
+                                    sport: pb.sport,
+                                    startTime: pb.startTime,
+                                    endTime: pb.endTime
+                                };
+                                slot.spotsLeft = 0;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // ── 5. Fair-use & suspension status ──────────────────────────

@@ -46,6 +46,7 @@ export const getSettingsPage = async (req, res) => {
             name: req.user.name || null,
             email: req.user.email,
             roles: req.user.roles,
+            captainOf: req.user.captainOf || null,
             status: req.user.status,
             isVerified: req.user.isVerified,
             profileDetails: {
@@ -218,6 +219,7 @@ export const getProfileCard = async (req, res) => {
             : req.user.roles?.includes('admin') ? 'Admin'
             : req.user.roles?.includes('executive') ? 'Executive'
             : req.user.roles?.includes('caretaker') ? 'Caretaker'
+            : req.user.roles?.includes('captain') ? `Captain (${req.user.captainOf || 'Unassigned'})`
             : 'Student';
 
         res.set('Cache-Control', 'private, max-age=60');
