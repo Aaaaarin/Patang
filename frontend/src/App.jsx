@@ -21,6 +21,19 @@ import SettingsPage from './pages/SettingsPage';
 import CoordinatorEventsPage from './pages/coordinator/CoordinatorEventsPage';
 import CoordinatorVenuesPage from './pages/coordinator/CoordinatorVenuesPage';
 
+// Executive pages
+import ExecutiveDashboardPage from './pages/executive/ExecutiveDashboardPage';
+import CalendarManagementPage from './pages/executive/CalendarManagementPage';
+import CoordinatorAccessPage from './pages/executive/CoordinatorAccessPage';
+import BookingApprovalsPage from './pages/executive/BookingApprovalsPage';
+import FeedbackReportsPage from './pages/executive/FeedbackReportsPage';
+import AnalyticsPage from './pages/executive/AnalyticsPage';
+import AuditLogPage from './pages/executive/AuditLogPage';
+import UserManagementPage from './pages/executive/UserManagementPage';
+import FacilityManagementPage from './pages/executive/FacilityManagementPage';
+import PenaltyManagementPage from './pages/executive/PenaltyManagementPage';
+import ExecutiveSettingsPage from './pages/executive/ExecutiveSettingsPage';
+
 function App() {
   return (
     <AuthProvider>
@@ -68,6 +81,54 @@ function App() {
             <Route
               path="/coordinator/venues"
               element={<AppLayout><CoordinatorVenuesPage /></AppLayout>}
+            />
+          </Route>
+
+          {/* Executive Routes — executive, admin only */}
+          <Route element={<ProtectedRoute allowedRoles={['executive', 'admin']} />}>
+            <Route
+              path="/executive/dashboard"
+              element={<AppLayout><ExecutiveDashboardPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/calendar"
+              element={<AppLayout><CalendarManagementPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/coordinators"
+              element={<AppLayout><CoordinatorAccessPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/approvals"
+              element={<AppLayout><BookingApprovalsPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/feedback"
+              element={<AppLayout><FeedbackReportsPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/analytics"
+              element={<AppLayout><AnalyticsPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/audit-log"
+              element={<AppLayout><AuditLogPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/users"
+              element={<AppLayout><UserManagementPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/facilities"
+              element={<AppLayout><FacilityManagementPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/penalties"
+              element={<AppLayout><PenaltyManagementPage /></AppLayout>}
+            />
+            <Route
+              path="/executive/settings"
+              element={<AppLayout><ExecutiveSettingsPage /></AppLayout>}
             />
           </Route>
 
